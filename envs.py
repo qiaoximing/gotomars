@@ -25,8 +25,10 @@ class Orbit(gym.Env):
         self.reset()
         
     def reset(self):
-        v_escape = 11.2 # km/s
-        self.state = np.array([v_escape, -self.r_earth])
+        v_escape = 29.79 # km/s
+        #r_earth = 1.496*10**8 # km
+        self.state = np.array([v_escape, -1.0])
+        #self.state = np.array([v_escape, -r_earth])
         self.step_count = 0
         return self.state
         
@@ -39,22 +41,26 @@ class Orbit(gym.Env):
         
         v0, r0 = self.state # auto cast to ndarray
         v1 = v0 + action
-        a = 1/(2/r0-v1**2*1000/self.G/self.M/self.au)
-        dE = 1/2/np.abs(v0**2-v1**2) # no need of self.m
+        #a = 1/(2/abs(r0)-v1**2*1000/self.G/self.M) # km
+        a = 1/(2/abs(r0)-v1**2*1000*self.au/self.G/self.M)
+        dE = 1/2/abs(v0**2-v1**2) # no need of self.m
         if r0>0:
             r1 = -2*a+r0
         else:
             r1 = 2*a+r0
         # If r1 goes to small, something's wrong
-        if r1 < 1e-2: # diameter of Sun ~ 1.3927e6 km ~ 1e-2 AU
+        if abs(r1) < 1e-2: # diameter of Sun ~ 1.3927e6 km ~ 1e-2 AU
             done = True
             reward = -10000
             r1 = 1e-2 # prevents div by zero
-        r2 = v1*r0/r1
-        self.state = np.array([v1[0], r2[0]])
-        if np.abs(r2) == self.r_mars:
+        v2 = v1*r0/r1
+        self.state = np.array([v2[0], r1[0]])
+        if np.abs(r1) == self.r_mars:
             done = True
             reward = 10000
         else:
             reward = -dE[0]
         return self.state, reward, done, {}
+
+
+env_config_default = {'max_step': 10,}
