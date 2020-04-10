@@ -12,7 +12,10 @@ class Orbit(gym.Env):
         # observation space: (velocity, radius)
         # self.observation_space = spaces.Tuple((spaces.Box(low=-50,high=50,shape=(1,)), spaces.Box(low=-23,high=23,shape=(1,))))
         # RLLib doesn't work well with Tuple?
-        self.observation_space = spaces.Box(low=-50, high=50, shape=(2,))
+        self.max_v = 50
+        self.max_r = 50
+        max_obs = max(self.max_v, self.max_r)
+        self.observation_space = spaces.Box(low=-max_obs, high=max_obs, shape=(2,))
         self.step_count = 0
         self.G = 6.67259e-17 # N km^2 / kg^2
         self.M = 1.989e30 # kg
@@ -36,7 +39,7 @@ class Orbit(gym.Env):
         assert self.action_space.contains(action)
         done = False
         self.step_count += 1
-        if self.step_count==self.max_step:
+        if self.step_count == self.max_step:
             done = True
         
         v0, r0 = self.state # auto cast to ndarray
@@ -48,18 +51,25 @@ class Orbit(gym.Env):
             r1 = -2*a+r0
         else:
             r1 = 2*a+r0
+            
         # If r1 goes to small, something's wrong
         if abs(r1) < 1e-2: # diameter of Sun ~ 1.3927e6 km ~ 1e-2 AU
             done = True
             reward = -10000
-            r1 = 1e-2 # prevents div by zero
+            return self.state, reward, done, {}
         v2 = v1*r0/r1
-        self.state = np.array([v2[0], r1[0]])
-        if np.abs(r1) == self.r_mars:
+        # verify the new state
+        if abs(v2) > self.max_v or abs(r1) > self.max_r:
             done = True
-            reward = 10000
+            reward = -10000
+            return self.state, reward, done, {}
+        self.state = np.array([v2[0], r1[0]])
+        
+        if abs(abs(r1) - self.r_mars) < 1e-2: # diameter of Mars ~ 6.8e3 km ~ 0.5e-4 AU
+            done = True
+            reward = 100 - dE[0] # hit Mars with minimal energy cost
         else:
-            reward = -dE[0]
+            reward = -100 * abs(abs(r1[0]) - self.r_mars) - dE[0] # minimize the abs distance to get some reward
         return self.state, reward, done, {}
 
 
