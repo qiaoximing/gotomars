@@ -76,32 +76,44 @@ class Orbit(gym.Env):
 class Space(gym.Env):
     def __init__(self, env_config):
         self.max_step = env_config['max_step']
+        self.integrator = env_config['integrator']
         # action space: velocity change
         self.action_space = spaces.Box(low=-5,high=5,shape=(2,)) # acceleration (ax,ay)
         # observation space: (velocity, position, Earth, Mars)
         self.observation_space = spaces.Box(low=-50, high=50, shape=(8,)) # (vx,vy, x,y, x1,y1, x2,y2)
         self.step_count = 0
-        self.G = 6.67259e-17 # N km^2 / kg^2
+        
+        # Use AU as distance unit
+        self.au = 1.4959787e8 # km
+        
+        self.G_km = 6.67259e-20 # km^3 kg^-1 s^-2
+        # Use km/s as velosity unit
+        self.G = self.G_km / self.au**2 # km au^2 kg^-1 s^-2
+        
         self.M = 1.989e30 # kg, mass of sun
         self.m_earth = 5.972e24
         self.m_mars = 6.39e23
-        # self.m = 100 # doesn't matter
-        # Use AU as standard distance unit
-        self.au = self.r_earth_km = 1.4959787e8 # km
-        self.r_mars_km = 2.2794e8 # km
+        
         self.r_earth = 1
-        self.r_mars = self.r_mars_km / self.au
+        self.r_mars = 2.2794e8 / self.au
+        
         self.w_earth = 0.986/24/60/60 # degree/s
         self.w_mars = self.w_earth*1.881
         self.ang_earth = -90
         self.ang_mars = -90
+        
+        self.t = 0
         self.reset()
     
     def reset(self):
-        self.state = np.array([29.79,0, 0,-self.r_earth-3.9588, 0,-self.r_earth, 0,-self.r_mars])
         self.step_count = 0
         self.ang_earth = -90
         self.ang_mars = -90
+        self.t = 0
+        self.state = np.array([5, 0,
+                               0, -self.r_earth, 
+                               0, -self.r_earth, 
+                               0, -self.r_mars])
         return self.state
     
     def step(self, action):
@@ -111,50 +123,65 @@ class Space(gym.Env):
         if self.step_count==self.max_step:
             done = True
             
-        vx,vy, x,y, x1,y1, x2,y2 = self.state
         v = self.state[0:2]
-        xy = self.state[2:4]
-        xy_e = self.state[4:6]
-        xy_m = self.state[6:8]
+        x = self.state[2:4]
+        x_e = self.state[4:6]
+        x_m = self.state[6:8]
         
-        # Compute gravity 
-        r_s = np.linalg.norm(xy) # Sun
-        a_s = -self.M / r_s**3 * xy 
-        r_e = np.linalg.norm(xy-xy_e) #Earth
-        a_e = -self.m_earth / r_e**3 * (xy-xy_e)
-        r_m = np.linalg.norm(xy-xy_m) # Mars
-        a_m = -self.m_mars / r_m**3 * (xy-xy_m)
+        # Compute gravity
+        def get_gravity(x):
+            r_s = np.linalg.norm(x) # Sun
+            a_s = -self.M * self.G / r_s**3 * x
+#         print(a_s)
+#         r_e = np.linalg.norm(x-x_e) #Earth
+#         a_e = -self.m_earth * self.G / self.au**2 / 1000 / r_e**3 * (x-x_e)
+#         r_m = np.linalg.norm(x-x_m) # Mars
+#         a_m = -self.m_mars * self.G / self.au**2 / 1000 / r_m**3 * (x-x_m)
+            a = a_s #+ a_e + a_m
+            return a
         
-        a_gravity = a_s + a_e + a_m
-        a_gravity = a_gravity * self.G / self.au**2 / 1000 # km/s
-        a_sum = a_gravity + np.array(action)
+        a_gravity = get_gravity(x)
+        a = a_gravity + action
         
         # Update State
-        simu_step = 100/np.linalg.norm(a_gravity) # need adjustment (s)
-        xy_new = v * simu_step + a_sum * simu_step**2 / 2
-        v_new = v + a_sum * simu_step
+        # Constant timestep
+        dt = 1e5
+        # Variable timestep: a^(-3/4) according to Kepler's third law
+        dt = 50 / np.linalg.norm(a_gravity)**0.75
+#         print(dt)
+        if self.integrator == "Euler":
+            v_new = v + a * dt
+            x_new = x + (v + v_new) * dt / 2 /self.au  
+        elif self.integrator == "Leapfrog":
+            v_new_half = v + a * dt / 2
+            x_new = x + v_new_half * dt / self.au
+            a_new = get_gravity(x_new) + action
+            v_new = v_new_half + a_new * dt / 2
+        else:
+            print("ERROR")
         
-        self.ang_earth = (self.ang_earth + self.w_earth * simu_step) % 360
-        if self.ang_earth > 180:
-            self.ang_earth -= 360
-        x1 = math.cos(self.ang_earth) * self.r_earth
-        y1 = math.sin(self.ang_earth) * self.r_earth
-        self.ang_mars = (self.ang_mars + self.w_mars * simu_step) % 360
-        if self.ang_mars > 180:
-            self.ang_mars -= 360
-        x2 = math.cos(self.ang_mars) * self.r_mars
-        y2 = math.sin(self.ang_mars) * self.r_mars
+        self.ang_earth = (self.ang_earth + self.w_earth * dt) % 360
+#         if self.ang_earth > 180:
+#             self.ang_earth -= 360
+        x1 = math.cos(self.ang_earth / 180 * math.pi) * self.r_earth
+        y1 = math.sin(self.ang_earth / 180 * math.pi) * self.r_earth
+        self.ang_mars = (self.ang_mars + self.w_mars * dt) % 360
+#         if self.ang_mars > 180:
+#             self.ang_mars -= 360
+        x2 = math.cos(self.ang_mars / 180 * math.pi) * self.r_mars
+        y2 = math.sin(self.ang_mars / 180 * math.pi) * self.r_mars
         
+        self.t += dt
         self.state[0:2] = v_new
-        self.state[2:4] = xy_new
-        self.state[4:8] = np.array([x1,y1,x2,y2])
+        self.state[2:4] = x_new
+        self.state[4:8] = np.array([x1, y1, x2, y2])
         
         # Reward
         reward = 0
-        if np.linalg.norm(xy_new) < 1e-2:
-            done = Ture
+        if np.linalg.norm(x_new) < 1e-2:
+            done = True
             reward = -10000
-        if np.linalg.norm(xy_new - np.array([x2,y2])) < 1e-4:
+        if np.linalg.norm(x_new - np.array([x2,y2])) < 1e-4:
             done = True
             reward = 10000
         
