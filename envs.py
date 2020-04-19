@@ -99,23 +99,25 @@ class Space(gym.Env):
         self.r_earth = 1
         self.r_mars = 2.2794e8 / self.au
         
-        self.w_earth = 2 * math.pi / 365.256 / 86400 # s^-1
+        self.year = 365.256 * 86400 # seconds per year
+        self.w_earth = 2 * math.pi / self.year  # s^-1
         self.w_mars = self.w_earth / self.r_mars**1.5
         self.ang_earth = 0
         self.ang_mars = 0
         
-        self.t = 0
+        self.t = 0 # passed time in seconds
         self.reset()
     
     def reset(self):
         self.step_count = 0
         self.ang_earth = 0
-        self.ang_mars = 0
+        self.ang_mars = 0.5
         self.t = 0
-        self.state = np.array([0, 34,
-                               self.r_earth - 2e-4, 0,
+        # v = (12.5, 28.2) can reach mars when earth gravity is off
+        self.state = np.array([12.5, 28.2,
+                               self.r_earth + 2e-4, 0,
                                self.r_earth, 0,
-                               0, -self.r_mars])
+                               self.r_mars, 0])
         return self.state
     
     def step(self, action):
@@ -143,7 +145,7 @@ class Space(gym.Env):
             return np.array([a_s, a_e, a_m])
         
         a_g = get_gravity(x, x_e, x_m)
-#         a_g[1:,:] = 0
+        a_g[1:2,:] = 1e-20 # remove earth gravity
 #         print(a_g)
         a = np.sum(a_g, axis=0) + action
         
@@ -151,14 +153,16 @@ class Space(gym.Env):
         # Constant timestep
         dt = 1e3
         # Variable timestep according to orbit period
-#         print((self.G_km * self.Ms / d(a_g, axis=1)**3)**(1/4))
+#         print(d(a_g, axis=1))
         dt = 5e-2 * np.min((self.G_km * self.Ms / d(a_g, axis=1)**3)**(1/4))
 #         print(dt)
 
         self.ang_earth = self.ang_earth + self.w_earth * dt
+        if self.ang_earth > np.pi: self.ang_earth -= np.pi*2
         x_e_new = np.array([math.cos(self.ang_earth),
                             math.sin(self.ang_earth)]) * self.r_earth
         self.ang_mars = self.ang_mars + self.w_mars * dt
+        if self.ang_earth > np.pi: self.ang_earth -= np.pi*2
         x_m_new = np.array([math.cos(self.ang_mars),
                             math.sin(self.ang_mars)]) * self.r_mars        
         
@@ -183,6 +187,9 @@ class Space(gym.Env):
         # Reward
         reward = 0
         if d(x_new) < 1e-2:
+            done = True
+            reward = -10000
+        if d(x_new) > 2:
             done = True
             reward = -10000
         if d(x_new - x_e_new) < 4.25e-5: # earth radius
