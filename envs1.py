@@ -11,7 +11,7 @@ class Space1(gym.Env):
         self.action_space = spaces.Box(low=-5,high=5,shape=(2,)) # acceleration (ax,ay)
         # observation space: (velocity, position, Earth, Mars)
         #self.observation_space = spaces.Box(low=-50, high=50, shape=(8,)) # (vx,vy, x,y, x1,y1, x2,y2)
-        self.observation_space = spaces.Box(low=-50, high=50, shape=(4,)) # (vx,vy, x,y)
+        self.observation_space = spaces.Box(low=-50, high=50, shape=(5,)) # (vx,vy, x,y, p)
         self.step_count = 0
         
         # Use AU as distance unit
@@ -54,7 +54,7 @@ class Space1(gym.Env):
         self.c2 = np.array([-(self.r_mars - self.r_earth), 0])
         
         
-        self.state = np.array([0, v0, self.r_earth + 2e-4, 0])
+        self.state = np.array([0, v0, self.r_earth + 2e-4, 0, 0])
         return self.state
     
     def step(self, action):
@@ -141,6 +141,12 @@ class Space1(gym.Env):
             dr = d(x_new - self.c2)
             cos_theta = (x_new[0]-self.c2[0])/dr
             dr0 = (self.r_mars+self.r_earth)/2*(1-self.ecc**2)/(1-self.ecc*cos_theta)
+            if dr > dr0:
+                self.state[-1] = 1
+            elif dr < dr0:
+                self.state[-1] = -1
+            else:
+                self.state[-1] = 0
             reward = -abs(dr-dr0)
         
 #         if d(x_new - x_e_new) < 4.25e-5: # earth radius
